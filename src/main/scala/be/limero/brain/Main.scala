@@ -12,6 +12,22 @@ object Ip {
   val ipAddress = InetAddress.getLocalHost.getHostAddress
 }
 
+
+class Echo(thread:NanoThread) extends Actor(thread) {
+  val in=new QueueFlow[Int](3)
+  val out = new ValueSource[Int](0)
+  in.async(thread,(i)=>out()=i+1)
+}
+
+class Sender(thread:NanoThread,max:Int) extends Actor(thread) {
+  val in=new QueueFlow[Int](3)
+  val out = new ValueSource[Int](0)
+  in.async(thread,(i)=> {
+    out() = i
+    if (( i % max)==0 ) NanoAkka.log.info(" handled "+i+" messages ")
+  })
+}
+
 class Poller(thread: NanoThread) extends Actor(thread) {
   var idx = 0
   val ticker = TimerSource(thread, 1, 500, true)
@@ -42,6 +58,8 @@ object Main {
   val upTime = new LambdaSource[Long](() => Sys.millis)
   val ipAddress = new LambdaSource[String](() => Ip.ipAddress)
   val poller = new Poller(mainThread)
+  val echo=new Echo(mainThread)
+  val sender = new Sender(mainThread,1000000)
 
   def convertToJson[T](json: String)(implicit fmt: Formats = DefaultFormats, mf: Manifest[T]): T =
     Extraction.extract(parse(json))
@@ -59,8 +77,12 @@ object Main {
       log.info("timer event " + vs())
     })
     poller(upTime, ipAddress)
+    echo.out >> sender.in
+    sender.out >> echo.in
+    echo.in.on(1)
     mainThread.start
     mqttThread.start
+
     vs() = 2
   }
 
