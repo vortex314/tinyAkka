@@ -1,10 +1,14 @@
 package be.limero.brain
 
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.{ArrayBlockingQueue, TimeUnit}
 
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable.ListBuffer
+import scala.reflect.ClassTag
+import scala.reflect._
+
 
 trait Subscriber[T] {
   def on(in: T): Unit
@@ -23,26 +27,88 @@ case class SubscriberFunction[T](callback: T => Unit) extends Subscriber[T] {
   def on(t: T): Unit = callback(t)
 }
 
-class ValueSource[T](var value: T) extends Source[T] {
-  var pass = true
+object NanoAkka {
+  val log: Logger = LoggerFactory.getLogger(classOf[NanoThread])
+  var bufferPushBusy=0
+  var bufferPopBusy=0;
+  var queueOverflow=0
+  var bufferOverflow=0
+  var bufferCasRetries=0
+  def defaultHandler[T]: T => Unit = _ => log.warn(" no handler specified")
+}
 
-  def request = {
-    emit(value)
+class ArrayQueue[T](size:Int)(implicit m: ClassTag[T]) {
+  val log: Logger = LoggerFactory.getLogger(classOf[ArrayQueue[T]])
+  var array=new Array[T](size)
+  private var readPtr=new AtomicInteger(0)
+  private var writePtr= new AtomicInteger(0)
+  private def next(idx:Int) =(idx+1)%size
+  private val BUSY=1<<16
+  def push(t:T):Boolean={
+    var cnt=0
+    while ( cnt < 5 ){
+      var expected = writePtr.get()
+      if ( (expected & BUSY) !=0) {
+        NanoAkka.bufferPushBusy+=1
+        log.warn("BUSY")
+        return false
+      }
+      var desired =next(expected)
+      if ( desired==readPtr.get()%size) {
+        NanoAkka.bufferOverflow+=1
+        return false
+      }
+      desired |= BUSY
+      if ( writePtr.weakCompareAndSet(expected,desired) ){
+        expected=desired
+        desired &= ~BUSY
+        array(desired)=t
+        while(writePtr.weakCompareAndSet(expected,desired)==false){
+          log.warn("writePtr remove busy failed")
+          NanoAkka.bufferCasRetries+=1
+          Thread.sleep(1)
+        }
+        return true
+      }
+      cnt+=1
+    }
+    log.warn("writePtr update failed")
+    false
   }
 
-  /*  private var _value:T=_
-
-    def value = _value
-  def value_= ( v:T ):Unit = {
-    _value = v
-    if ( pass ) emit(_value)
-  }*/
-  def update(v: T): Unit = {
-    value = v
-    if (pass) emit(value)
+  def pop():Option[T]={
+    var cnt=0
+    while ( cnt < 5 ){
+      var expected = readPtr.get()
+      if ( (expected & BUSY) !=0) {
+        NanoAkka.bufferPopBusy+=1
+        log.warn("BUSY")
+        return None
+      }
+      var desired =next(expected)
+      if ( expected==writePtr.get()%size) {
+        return None
+      }
+      desired |= BUSY
+      if ( readPtr.weakCompareAndSet(expected,desired) ){
+        expected=desired
+        desired &= ~BUSY
+        val t=array(desired)
+        while(readPtr.weakCompareAndSet(expected,desired)==false){
+          log.warn("writePtr remove busy failed")
+          NanoAkka.bufferCasRetries+=1
+          Thread.sleep(1)
+        }
+        return Some(t)
+      }
+      cnt+=1
+    }
+    log.warn("writePtr update failed")
+    None
   }
 
 }
+
 
 case class TimerMsg(id: Int)
 
@@ -51,9 +117,9 @@ case class TimerSource(thread: NanoThread, id: Int, interval: Int, repeat: Boole
   thread.timerSources += this
   var expiresOn: Long = millis() + interval
 
-  def millis(): Long = System.currentTimeMillis()
-
   def timeout(): Long = expiresOn - millis()
+
+  def millis(): Long = System.currentTimeMillis()
 
   def request(): Unit = {
     if (repeat) {
@@ -66,17 +132,17 @@ case class TimerSource(thread: NanoThread, id: Int, interval: Int, repeat: Boole
   }
 }
 
-case class Sink[T](var callback: T => Unit) extends Subscriber[T] with Invoker {
-  val log: Logger = LoggerFactory.getLogger(classOf[NanoThread])
 
-  var queue = new ArrayBlockingQueue[T](100)
+
+case class Sink[T](var callback: T => Unit = NanoAkka.defaultHandler[T], size:Int=3)(implicit ct:ClassTag[T]) extends Subscriber[T] with Invoker {
+  val log: Logger = LoggerFactory.getLogger(classOf[NanoThread])
+  var queue = new ArrayQueue[T](size)(ct)
   var thread: NanoThread = _
-  callback = _ => log.warn("no handler assigned to Sink")
 
   def on(t: T): Unit = {
     if (thread == null) callback(t)
     else {
-      queue.put(t)
+      queue.push(t)
       thread.enqueue(this)
     }
   }
@@ -84,8 +150,9 @@ case class Sink[T](var callback: T => Unit) extends Subscriber[T] with Invoker {
   def request(): Unit = invoke()
 
   def invoke(): Unit = {
-    val t = queue.poll()
-    callback(t)
+    val t = queue.pop()
+    if ( t.nonEmpty)
+    callback(t.get)
   }
 
   def async(thread: NanoThread, callback: T => Unit): Unit = {
@@ -146,23 +213,75 @@ class Source[OUT] extends Publisher[OUT] {
   }
 
   def emit(out: OUT): Unit = {
+    if (subscribers.size == 0) log.warn(" no subscribers for " + out.getClass.toString)
     subscribers.foreach(sub => sub.on(out))
   }
 }
 
-abstract class Flow[IN, OUT] extends Source[OUT] with Subscriber[IN] {}
-
-case class QueueFlow[T](depth: Int) extends Flow[T, T] {
-  def on(t: T): Unit = {}
+class LambdaSource[T](lambda: () => T) extends Source[T] {
+  def request() = {
+    emit(lambda())
+  }
 }
 
+class ValueSource[T](var value: T) extends Source[T] {
+  var pass = true
+
+  def request = {
+    emit(value)
+  }
+
+  def update(v: T): Unit = {
+    value = v
+    if (pass) emit(value)
+  }
+
+  def apply(): T = value
+}
+
+abstract class Flow[IN, OUT] extends Source[OUT] with Subscriber[IN] {}
+
 object QueueFlow
+
+case class QueueFlow[T](val depth: Int)(implicit ct:ClassTag[T])
+  extends Flow[T, T] with Invoker {
+  //  val log: Logger = LoggerFactory.getLogger(classOf[QueueFlow[T]])
+
+  var queue = new ArrayQueue[T](depth)(ct)
+  var thread: NanoThread = _
+
+  def on(t: T): Unit = {
+    if (thread == null) {
+      emit(t)
+    }
+    else {
+      if ( queue.push(t))
+      thread.enqueue(this)
+    }
+  }
+
+  def request(): Unit = invoke()
+
+  def invoke(): Unit = {
+    val t = queue.pop()
+    if ( t.nonEmpty)
+    emit(t.get)
+  }
+
+  def async(thread: NanoThread, callback: T => Unit): Unit = {
+    this.thread = thread
+  }
+
+  def sync(callback: T => Unit): Unit = {
+    thread = null
+  }
+}
 
 object Flow
 
 class ValueFlow[T] extends Flow[T, T] {
-  private var t: T = _
   var pass = false
+  private var t: T = _
 
   def request = emit(t)
 
@@ -182,21 +301,5 @@ class Actor(thread: NanoThread) {}
 
 // JSON conversion
 
-case class MqttMsg(topic: String, message: String)
 
 
-object Source {
-  val log: Logger = LoggerFactory.getLogger(classOf[NanoThread])
-
-  def main(args: Array[String]): Unit = {
-    val source: Source[Int] = new Source[Int]
-    val sink = Sink[Int](i => log.info("i:" + i))
-
-    source >> sink
-    source.emit(1)
-    val thread = NanoThread("main")
-    val ts = TimerSource(thread, 1, 1000, repeat = true)
-    ts >> (_ => log.info("timer event "))
-    thread.run()
-  }
-}
