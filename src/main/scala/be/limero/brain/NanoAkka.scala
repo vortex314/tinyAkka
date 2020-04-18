@@ -219,7 +219,7 @@ class Source[OUT] extends Publisher[OUT] {
   }
 }
 
-class LambdaSource[T](lambda: () => T) extends Source[T] {
+class LambdaSource[T](lambda: () => T) extends Source[T] with Requestable {
   def request() = {
     emit(lambda())
   }
