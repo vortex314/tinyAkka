@@ -18,13 +18,13 @@ case class MqttMsg(topic: String, message: String)
 class Mqtt(thread: NanoThread) extends Actor(thread) {
   val log: Logger = LoggerFactory.getLogger(classOf[Mqtt])
 
-  val outgoing= Sink[MqttMsg] ()
+  val outgoing= Sink[MqttMsg] ((mm) => publish(mm),20)
   val incoming: QueueFlow[MqttMsg] = QueueFlow[MqttMsg](10)
   val ip = InetAddress.getLocalHost
   val hostname = ip.getHostName
   val srcPrefix = "src/" + hostname + "/"
   val dstPrefix = "dst/" + hostname + "/"
-  val persistence = new MqttDefaultFilePersistence("/tmp")
+  val persistence = new  MemoryPersistence
   var client: MqttClient = null
 
   def init = {
@@ -46,13 +46,12 @@ class Mqtt(thread: NanoThread) extends Actor(thread) {
         }
         override def connectionLost(cause: Throwable): Unit = {
           log.warn("MQTT lost connection, reconnecting")
-          client.connect()
+          client.reconnect()
           client.subscribe(dstPrefix + "#")
         }
         override def deliveryComplete(token: IMqttDeliveryToken): Unit = {
         }
       }
-
       //Set up callback for MqttClient
       client.setCallback(callback)
     }
@@ -85,8 +84,6 @@ class Mqtt(thread: NanoThread) extends Actor(thread) {
       outgoing.on(MqttMsg(srcPrefix + topic, anyToJson[T](t)))
     })
   }
-
-
   def fromTopic[T](topic: String): Source[T] = {
     val valueFlow = new ValueFlow[T]()
     incoming >> ((mm) => {
@@ -96,97 +93,5 @@ class Mqtt(thread: NanoThread) extends Actor(thread) {
       }
     })
     valueFlow
-  }
-
-
-}
-
-object Mqtt
-
-object MqttPublisher {
-
-  def main(args: Array[String]) {
-    val brokerUrl = "tcp://limero.ddns.net:1883"
-    val topic = "foo"
-    val msg = "Hello world test data"
-
-    var client: MqttClient = null
-
-    // Creating new persistence for mqtt client
-    val persistence = new MqttDefaultFilePersistence("/tmp")
-
-    try {
-      // mqtt client with specific url and client id
-      client = new MqttClient(brokerUrl, MqttClient.generateClientId, persistence)
-
-      client.connect()
-
-      val msgTopic = client.getTopic(topic)
-      val message = new MqttMessage(msg.getBytes("utf-8"))
-
-      while (true) {
-        msgTopic.publish(message)
-        println("Publishing Data, Topic : %s, Message : %s".format(msgTopic.getName, message))
-        java.lang.Thread.sleep(100)
-      }
-    }
-
-    catch {
-      case e: MqttException => println("Exception Caught: " + e)
-    }
-
-    finally {
-      client.disconnect()
-    }
-  }
-}
-
-/**
- *
- * MQTT subcriber
- *
- * @author Prabeesh K
- * @mail prabsmails@gmail.com
- *
- */
-
-object MqttSubscriber {
-
-  def main(args: Array[String]) {
-
-    val brokerUrl = "tcp://localhost:1883"
-    val topic = "foo"
-
-    //Set up persistence for messages
-    val persistence = new MemoryPersistence
-
-    //Initializing Mqtt Client specifying brokerUrl, clientID and MqttClientPersistance
-    val client = new MqttClient(brokerUrl, MqttClient.generateClientId, persistence)
-
-    //Connect to MqttBroker
-    client.connect
-
-    //Subscribe to Mqtt topic
-    client.subscribe(topic)
-
-    //Callback automatically triggers as and when new message arrives on specified topic
-    val callback = new MqttCallback {
-
-      override def messageArrived(topic: String, message: MqttMessage): Unit = {
-        println("Receiving Data, Topic : %s, Message : %s".format(topic, message))
-      }
-
-      override def connectionLost(cause: Throwable): Unit = {
-        println(cause)
-      }
-
-      override def deliveryComplete(token: IMqttDeliveryToken): Unit = {
-
-      }
-    }
-
-    //Set up callback for MqttClient
-    client.setCallback(callback)
-
   }
 }

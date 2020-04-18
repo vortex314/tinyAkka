@@ -37,7 +37,7 @@ object NanoAkka {
   def defaultHandler[T]: T => Unit = _ => log.warn(" no handler specified")
 }
 
-class ArrayQueue[T](size:Int)(implicit m: ClassTag[T]) {
+class ArrayQueue[T](size:Int)(implicit ct: ClassTag[T]) {
   val log: Logger = LoggerFactory.getLogger(classOf[ArrayQueue[T]])
   var array=new Array[T](size)
   private var readPtr=new AtomicInteger(0)
@@ -56,6 +56,7 @@ class ArrayQueue[T](size:Int)(implicit m: ClassTag[T]) {
       var desired =next(expected)
       if ( desired==readPtr.get()%size) {
         NanoAkka.bufferOverflow+=1
+        log.warn("buffer overflow "+ct.toString()+" on" + t.toString)
         return false
       }
       desired |= BUSY
