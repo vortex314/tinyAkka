@@ -7,7 +7,6 @@ import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.mutable.ListBuffer
 import scala.reflect.ClassTag
-import scala.reflect._
 
 
 trait Subscriber[T] {
@@ -29,80 +28,84 @@ case class SubscriberFunction[T](callback: T => Unit) extends Subscriber[T] {
 
 object NanoAkka {
   val log: Logger = LoggerFactory.getLogger(classOf[NanoThread])
-  var bufferPushBusy=0
-  var bufferPopBusy=0;
-  var queueOverflow=0
-  var bufferOverflow=0
-  var bufferCasRetries=0
+  var bufferPushBusy = 0
+  var bufferPopBusy = 0;
+  var queueOverflow = 0
+  var bufferOverflow = 0
+  var bufferCasRetries = 0
+
   def defaultHandler[T]: T => Unit = _ => log.warn(" no handler specified")
 }
 
-class ArrayQueue[T](size:Int)(implicit ct: ClassTag[T]) {
+class ArrayQueue[T](size: Int)(implicit ct: ClassTag[T]) {
   val log: Logger = LoggerFactory.getLogger(classOf[ArrayQueue[T]])
-  var array=new Array[T](size)
-  private var readPtr=new AtomicInteger(0)
-  private var writePtr= new AtomicInteger(0)
-  private def next(idx:Int) =(idx+1)%size
-  private val BUSY=1<<16
-  def push(t:T):Boolean={
-    var cnt=0
-    while ( cnt < 5 ){
+  var array = new Array[T](size)
+  private var readPtr = new AtomicInteger(0)
+  private var writePtr = new AtomicInteger(0)
+
+  private def next(idx: Int) = (idx + 1) % size
+
+  private val BUSY = 1 << 16
+
+  def push(t: T): Boolean = {
+    var cnt = 0
+    while (cnt < 5) {
       var expected = writePtr.get()
-      if ( (expected & BUSY) !=0) {
-        NanoAkka.bufferPushBusy+=1
+      if ((expected & BUSY) != 0) {
+        NanoAkka.bufferPushBusy += 1
         log.warn("BUSY")
         return false
       }
-      var desired =next(expected)
-      if ( desired==readPtr.get()%size) {
-        NanoAkka.bufferOverflow+=1
-        log.warn("buffer overflow "+ct.toString()+" on" + t.toString)
+      var desired = next(expected)
+      if (desired == readPtr.get() % size) {
+        NanoAkka.bufferOverflow += 1
+        log.warn("buffer overflow " + ct.toString() + " on" + t.toString)
         return false
       }
       desired |= BUSY
-      if ( writePtr.weakCompareAndSet(expected,desired) ){
-        expected=desired
+      if (writePtr.weakCompareAndSet(expected, desired)) {
+        expected = desired
         desired &= ~BUSY
-        array(desired)=t
-        while(writePtr.weakCompareAndSet(expected,desired)==false){
+        array(desired) = t
+        while (writePtr.weakCompareAndSet(expected, desired) == false) {
           log.warn("writePtr remove busy failed")
-          NanoAkka.bufferCasRetries+=1
+          NanoAkka.bufferCasRetries += 1
           Thread.sleep(1)
         }
         return true
       }
-      cnt+=1
+      cnt += 1
     }
     log.warn("writePtr update failed")
     false
   }
 
-  def pop():Option[T]={
-    var cnt=0
-    while ( cnt < 5 ){
+  def pop(): Option[T] = {
+    var cnt = 0
+    while (cnt < 5) {
       var expected = readPtr.get()
-      if ( (expected & BUSY) !=0) {
-        NanoAkka.bufferPopBusy+=1
+      if ((expected & BUSY) != 0) {
+        NanoAkka.bufferPopBusy += 1
         log.warn("BUSY")
         return None
       }
-      var desired =next(expected)
-      if ( expected==writePtr.get()%size) {
+      var desired = next(expected)
+      if (expected == writePtr.get() % size) {
         return None
       }
       desired |= BUSY
-      if ( readPtr.weakCompareAndSet(expected,desired) ){
-        expected=desired
+      if (readPtr.weakCompareAndSet(expected, desired)) {
+        expected = desired
         desired &= ~BUSY
-        val t=array(desired)
-        while(readPtr.weakCompareAndSet(expected,desired)==false){
+        val t = array(desired)
+        while (readPtr.weakCompareAndSet(expected, desired) == false) {
           log.warn("writePtr remove busy failed")
-          NanoAkka.bufferCasRetries+=1
+          NanoAkka.bufferCasRetries += 1
           Thread.sleep(1)
         }
         return Some(t)
       }
-      cnt+=1
+      cnt += 1
     }
     log.warn("writePtr update failed")
     None
@@ -134,12 +137,10 @@ case class TimerSource(thread: NanoThread, id: Int, interval: Int, repeat: Boole
 }
 
 
-
-case class Sink[T](var callback: T => Unit = NanoAkka.defaultHandler[T], size:Int=3)(implicit ct:ClassTag[T]) extends Subscriber[T] with Invoker {
+case class Sink[T]( size: Int = 3,var callback: T => Unit = NanoAkka.defaultHandler[T])(implicit ct: ClassTag[T]) extends Subscriber[T] with Invoker {
   val log: Logger = LoggerFactory.getLogger(classOf[NanoThread])
   var queue = new ArrayQueue[T](size)(ct)
   var thread: NanoThread = _
-
   def on(t: T): Unit = {
     if (thread == null) callback(t)
     else {
@@ -152,8 +153,8 @@ case class Sink[T](var callback: T => Unit = NanoAkka.defaultHandler[T], size:In
 
   def invoke(): Unit = {
     val t = queue.pop()
-    if ( t.nonEmpty)
-    callback(t.get)
+    if (t.nonEmpty)
+      callback(t.get)
   }
 
   def async(thread: NanoThread, callback: T => Unit): Unit = {
@@ -184,6 +185,7 @@ case class NanoThread(name: String) extends Thread {
         timeout = ts.timeout()
         timerSource = ts
       })
+      if ( timeout <0  && timerSource != null) timerSource.request()
       // waith for work and sleep
       val invoker = workQueue.poll(timeout, TimeUnit.MILLISECONDS)
       if (invoker != null) {
@@ -201,6 +203,11 @@ trait Publisher[T] {
 
   def >>(subscriber: Subscriber[T]): Unit = subscribe(subscriber)
 
+  def >>[OUT](flow:Flow[T,OUT]) : Source[OUT] = {
+    subscribe(flow)
+    flow
+  }
+
   def >>(f: T => Unit): Unit = subscribe(new SubscriberFunction[T](f))
 }
 
@@ -215,7 +222,7 @@ class Source[OUT] extends Publisher[OUT] {
 
   def emit(out: OUT): Unit = {
     if (subscribers.size == 0) log.warn(" no subscribers for " + out.getClass.toString)
-    subscribers.foreach(sub => sub.on(out))
+    else subscribers.foreach(sub => sub.on(out))
   }
 }
 
@@ -240,11 +247,16 @@ class ValueSource[T](var value: T) extends Source[T] {
   def apply(): T = value
 }
 
-abstract class Flow[IN, OUT] extends Source[OUT] with Subscriber[IN] {}
+abstract class Flow[IN, OUT] extends Source[OUT] with Subscriber[IN] {
+  def ==(flow:Flow[OUT,IN]):Unit = {
+    subscribe(flow)
+    flow.subscribe(this)
+  }
+}
 
 object QueueFlow
 
-case class QueueFlow[T](val depth: Int)(implicit ct:ClassTag[T])
+case class QueueFlow[T](val depth: Int)(implicit ct: ClassTag[T])
   extends Flow[T, T] with Invoker {
   //  val log: Logger = LoggerFactory.getLogger(classOf[QueueFlow[T]])
 
@@ -256,8 +268,8 @@ case class QueueFlow[T](val depth: Int)(implicit ct:ClassTag[T])
       emit(t)
     }
     else {
-      if ( queue.push(t))
-      thread.enqueue(this)
+      if (queue.push(t))
+        thread.enqueue(this)
     }
   }
 
@@ -265,15 +277,14 @@ case class QueueFlow[T](val depth: Int)(implicit ct:ClassTag[T])
 
   def invoke(): Unit = {
     val t = queue.pop()
-    if ( t.nonEmpty)
-    emit(t.get)
+    if (t.nonEmpty) emit(t.get)
   }
 
-  def async(thread: NanoThread, callback: T => Unit): Unit = {
+  def async(thread: NanoThread): Unit = {
     this.thread = thread
   }
 
-  def sync(callback: T => Unit): Unit = {
+  def sync(): Unit = {
     thread = null
   }
 }
