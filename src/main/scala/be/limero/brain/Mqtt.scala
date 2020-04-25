@@ -19,33 +19,32 @@ case class MqttMsg(topic: String, message: String)
 class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
   val log: Logger = LoggerFactory.getLogger(classOf[Mqtt])
 
-  val outgoing = Sink[MqttMsg](20)
-  outgoing.async(thread, (mm) => publish(mm))
+  val outgoing :Sink[MqttMsg]= Sink[MqttMsg](20)
   val incoming: QueueFlow[MqttMsg] = QueueFlow[MqttMsg](10)
-  val ip = InetAddress.getLocalHost
-  val hostname = ip.getHostName
-  val srcPrefix = "src/" + hostname + "/"
-  val dstPrefix = "dst/" + hostname + "/"
+  val ip :InetAddress= InetAddress.getLocalHost
+  val hostname :String = ip.getHostName
+  val srcPrefix :String= "src/" + hostname + "/"
+  val dstPrefix :String= "dst/" + hostname + "/"
   val persistence = new MemoryPersistence
-  var client: MqttClient = null
-  var subscribedTopics = ListBuffer[String]()
-  val brokerUrl = "tcp://limero.ddns.net:1883"
+  var client: MqttClient = _
+  var subscribedTopics :ListBuffer[String]= ListBuffer[String]()
+  var brokerUrl = "tcp://limero.ddns.net:1883"
 
-  def init = {
+  def init():Unit = {
     try {
       // mqtt client with specific url and client id
-      outgoing.async(thread, (mm) => publish(mm))
+      outgoing.async(thread, mm => publish(mm))
       incoming >> (mm => log.debug("MQTT RXD " + mm.topic))
       incoming.async(thread)
       subscribedTopics+= dstPrefix+"#"
-      initClient
+      initClient()
     }
     catch {
       case e: MqttException => println("Mqtt init() exception: " + e)
     }
   }
 
-  def initClient = {
+  private def initClient():Unit = {
     try {
       client = new MqttClient(brokerUrl, MqttClient.generateClientId, persistence)
       val connOpts = new MqttConnectOptions
@@ -55,7 +54,7 @@ class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
       connOpts.setMaxInflight(10)
       client.connect(connOpts)
       client.setCallback(this)
-      resubscribeAll
+      resubscribeAll()
     }
     catch {
       case e: MqttException => println("Mqtt init() exception: " + e)
@@ -74,13 +73,13 @@ class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
   override def connectionLost(cause: Throwable): Unit = {
     log.warn("MQTT lost connection, reconnecting")
     client.close(true)
-    initClient
+    initClient()
   }
   override def deliveryComplete(token: IMqttDeliveryToken): Unit = {
   }
 
-  def resubscribeAll = {
-    subscribedTopics.foreach((topic) => {
+  def resubscribeAll():Unit = {
+    subscribedTopics.foreach(topic => {
       log.info(" subscribing to " + topic)
       try {
         client.subscribe(topic)
@@ -90,7 +89,7 @@ class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
     })
   }
 
-  def subscribe(topic: String) = {
+  def subscribe(topic: String):Unit = {
     if (subscribedTopics.forall(t => {
       t.compareTo(topic) != 0
     })) {
@@ -104,7 +103,7 @@ class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
     }
   }
 
-  def publish(mm: MqttMsg) = {
+  def publish(mm: MqttMsg):Unit = {
     if ( client.isConnected ) {
       val msgTopic = client.getTopic(mm.topic)
       val message = new MqttMessage(mm.message.getBytes("utf-8"))
@@ -120,7 +119,7 @@ class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
   }
 
   def anyToJson[T](value: T): String = {
-    implicit val formats = Serialization.formats(NoTypeHints)
+    implicit val formats : Formats= Serialization.formats(NoTypeHints)
     write(value)
   }
 
@@ -134,7 +133,7 @@ class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
 
   def to[T](topic: String)(implicit ct: ClassTag[T]): Sink[T] = {
     Sink[T](3, t => {
-      if ( topic.startsWith("dst/")) outgoing.on(MqttMsg(topic, anyToJson[T](t)))
+      if ( topic.startsWith("dst/") || topic.startsWith("src/")) outgoing.on(MqttMsg(topic, anyToJson[T](t)))
       else outgoing.on(MqttMsg(srcPrefix+topic, anyToJson[T](t)))
     })
   }
@@ -143,13 +142,13 @@ class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
     val valueFlow = new ValueFlow[T]()
 
     subscribe(topic)
-    incoming >> ((mm) => {
+    incoming >> (mm => {
       if (mm.topic == topic) {
-        val v = jsonToAny[T](mm.message)(manifest[T])
         try {
+          val v = jsonToAny[T](mm.message)(manifest[T])
           valueFlow.on(v)
         } catch {
-          case ex:Exception => log.error("exception in handling mqtt message ")
+          case ex:Exception => log.error("exception in handling mqtt message '"+mm.message+"' => "+ex.getMessage)
         }
       }
     })
