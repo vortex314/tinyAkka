@@ -1,13 +1,11 @@
 <component name="libraryTable">
   <library name="sbt: org.json4s:json4s-core_2.13:3.7.0-M2:jar">
     <CLASSES>
-      <root url="jar://$USER_HOME$/Library/Caches/Coursier/v1/https/artifactory.ing.net/artifactory/releases_mvn_all/org/json4s/json4s-core_2.13/3.7.0-M2/json4s-core_2.13-3.7.0-M2.jar!/" />
+      <root url="jar://$USER_HOME$/.cache/coursier/v1/https/repo1.maven.org/maven2/org/json4s/json4s-core_2.13/3.7.0-M2/json4s-core_2.13-3.7.0-M2.jar!/" />
     </CLASSES>
-    <JAVADOC>
-      <root url="jar://$USER_HOME$/Library/Caches/Coursier/v1/https/artifactory.ing.net/artifactory/releases_mvn_all/org/json4s/json4s-core_2.13/3.7.0-M2/json4s-core_2.13-3.7.0-M2-javadoc.jar!/" />
-    </JAVADOC>
+    <JAVADOC />
     <SOURCES>
-      <root url="jar://$USER_HOME$/Library/Caches/Coursier/v1/https/artifactory.ing.net/artifactory/releases_mvn_all/org/json4s/json4s-core_2.13/3.7.0-M2/json4s-core_2.13-3.7.0-M2-sources.jar!/" />
+      <root url="jar://$USER_HOME$/.cache/coursier/v1/https/repo1.maven.org/maven2/org/json4s/json4s-core_2.13/3.7.0-M2/json4s-core_2.13-3.7.0-M2-sources.jar!/" />
     </SOURCES>
   </library>
 </component>

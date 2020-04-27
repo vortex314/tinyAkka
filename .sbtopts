@@ -1,3 +1,1 @@
--Dsbt.override.build.repos=true
--Dsbt.repository.config=./repositories
 -Dsbt.classloader.close=false

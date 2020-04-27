@@ -219,17 +219,22 @@ trait Publisher[T] {
   def >>(f: T => Unit): Unit = subscribe(new SubscriberFunction[T](f))
 }
 
-class Source[OUT] extends Publisher[OUT] {
-
+class Source[T] extends Publisher[T] {
+/*
+  override def >>(subscriber: Subscriber[T]): Unit = subscribe(subscriber)
+  override def >>[OUT](flow:Flow[T,OUT]) : Source[OUT] = {
+    subscribe(flow)
+    flow
+  }*/
   val log: Logger = LoggerFactory.getLogger(classOf[NanoThread])
 
-  var subscribers: ListBuffer[Subscriber[OUT]] = ListBuffer[Subscriber[OUT]]()
+  var subscribers: ListBuffer[Subscriber[T]] = ListBuffer[Subscriber[T]]()
 
-  def subscribe(subscriber: Subscriber[OUT]): Unit = {
+  def subscribe(subscriber: Subscriber[T]): Unit = {
     subscribers += subscriber
   }
 
-  def emit(out: OUT): Unit = {
+  def emit(out: T): Unit = {
     if (subscribers.isEmpty) log.warn(" no subscribers for " + out.getClass.toString)
     else subscribers.foreach(sub => sub.on(out))
   }
@@ -242,6 +247,7 @@ class LambdaSource[T](lambda: () => T) extends Source[T] with Requestable {
 }
 
 class ValueSource[T](var value: T) extends Source[T] {
+
   var pass = true
 
   def request():Unit = {

@@ -1,8 +1,21 @@
 import sbtassembly.MergeStrategy
+import Process._
 
+import scala.sys.process.Process
+//lazy val root = (project in file(".")).disablePlugins(JavaServerAppPackaging)
+lazy val root = Project(id="project", base = file("."))
+
+val deployAndRunTask = TaskKey[Unit]("deploy-and-run-task", "Short example")
+
+deployAndRunTask := {
+  def shellRun(command: String*) = Process(command.toSeq).!!.trim
+  println(" rcp jar ")
+  val result = shellRun("/usr/bin/rcp", "./target/scala-2.13/tinyAkka-assembly-0.1.jar", "pi3.local:tinyAkka.jar")
+  println(result)
+}
 name := "tinyAkka"
 version := "0.1"
-scalaVersion := "2.13.1"
+scalaVersion := "2.13.2"
 
 libraryDependencies ++= Seq(
   "org.slf4j" % "slf4j-api" % "1.7.25",
@@ -24,9 +37,6 @@ lazy val commonSettings = Seq(
   mainClass in assembly := Some("be.limero.brain.Main"),
   assemblyJarName in assembly := "utils.jar",
 )
-
-lazy val app = (project in file("app")).
-  settings(commonSettings: _*)
 
 
 val defaultMergeStrategy: String => MergeStrategy = {
