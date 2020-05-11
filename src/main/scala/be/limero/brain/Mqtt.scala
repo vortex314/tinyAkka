@@ -1,8 +1,6 @@
 package be.limero.brain
 
 
-import java.net.InetAddress
-
 import org.eclipse.paho.client.mqttv3._
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
 import org.json4s._
@@ -21,8 +19,7 @@ class Mqtt(thread: NanoThread) extends Actor(thread) with MqttCallback {
 
   val outgoing :Sink[MqttMsg]= Sink[MqttMsg](20)
   val incoming: QueueFlow[MqttMsg] = QueueFlow[MqttMsg](10)
-  val ip :InetAddress= InetAddress.getLocalHost
-  val hostname :String = ip.getHostName
+  val hostname :String = Sys.hostname
   val srcPrefix :String= "src/" + hostname + "/"
   val dstPrefix :String= "dst/" + hostname + "/"
   val persistence = new MemoryPersistence

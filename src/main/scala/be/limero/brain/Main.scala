@@ -99,7 +99,8 @@ object Main {
     val echo = new Echo(mainThread)
     val sender = new Sender(mainThread, 1000000)
 
- //   mqtt.brokerUrl="tcp://localhost:1883"
+    if ( Sys.hostname.compareToIgnoreCase("pi3")==0)  mqtt.brokerUrl="tcp://localhost:1883"
+    else mqtt.brokerUrl="tcp://limero.ddns.net:1883"
     mqtt.init()
     poller.init()
     val vs = new ValueSource[Int](1)
@@ -116,18 +117,18 @@ object Main {
         " busyPop : "+NanoAkka.bufferPopBusy+
         " busyPush "+NanoAkka.bufferPushBusy)
     })
-    timer >> new LambdaFlow[TimerMsg,Int]( _ =>  vs() )  >> mqtt.to[Int]("src/remote/remote/potLeft")
+ //   timer >> new LambdaFlow[TimerMsg,Int]( _ =>  vs() )  >> mqtt.to[Int]("src/remote/remote/potLeft")
     mqtt.from[Int]("src/remote/remote/potLeft") >>
       Scale(0, 1023, -90, +90) >>
-      Step(5) >>
+      Step(2) >>
       Zero(10) >>
  //     Changed(1000, 0) >>
- //     Log[Int]("angleTarget:") >>
+      Log[Int]("angleTarget:") >>
       mqtt.to[Int]("dst/drive/stepper/angleTarget")
 
     mqtt.from[Int]("src/remote/remote/potRight") >>
       Scale(0, 1023, -200, +200) >>
-      Step(10) >>
+      Step(5) >>
       Zero(20) >>
  //     Changed(1000, 0) >>
  //     Log[Int]("rpmTarget:") >>
