@@ -63,10 +63,22 @@ case class Zero(zero: Int) extends Flow[Int, Int] {
     else emit(value)
   }
 }
+
+// if abs(value) < zero send 0
+case class Toggle() extends Flow[Boolean, Boolean] {
+  var lastValue=false
+  def on(value: Boolean): Unit = {
+    if (value) {
+      lastValue= !lastValue
+      emit(lastValue)
+    }
+    else emit(value)
+  }
+}
 // log the item
 case class Log[T](msg: String) extends Flow[T, T] {
   def on(t: T): Unit = {
-    log.info(msg + t)
+    log.info(msg + ":"+ t)
     emit(t)
   }
 }
@@ -85,7 +97,6 @@ case class Changed[T](timeout: Int, var oldValue: T) extends Flow[T, T] {
 
 object Main {
   val log: Logger = LoggerFactory.getLogger(classOf[Thread])
-
 
   def main(args: Array[String]): Unit = {
 
@@ -120,8 +131,8 @@ object Main {
  //   timer >> new LambdaFlow[TimerMsg,Int]( _ =>  vs() )  >> mqtt.to[Int]("src/remote/remote/potLeft")
     mqtt.from[Int]("src/remote/remote/potLeft") >>
       Scale(0, 1023, -90, +90) >>
-      Step(2) >>
-      Zero(10) >>
+      Step(1) >>
+      Zero(5) >>
  //     Changed(1000, 0) >>
       Log[Int]("angleTarget:") >>
       mqtt.to[Int]("dst/drive/stepper/angleTarget")
@@ -138,6 +149,9 @@ object Main {
  //     Changed[Boolean](1000, false) >>
 //      Log[Boolean]("buttonLeft:") >>
       mqtt.to[Boolean]("dst/cutter/cutter/on")
+
+    mqtt.from[Boolean]("src/remote/system/alive") >> Toggle() >>  mqtt.to[Boolean]("dst/remote/remote/ledLeft")
+    mqtt.from[Boolean]("src/drive/system/alive") >> Toggle() >>  mqtt.to[Boolean]("dst/remote/remote/ledRight")
 
     poller(upTime, ipAddress)
     echo.out >> sender.in
