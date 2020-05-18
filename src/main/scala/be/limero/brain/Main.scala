@@ -142,7 +142,7 @@ object Main {
       Step(5) >>
       Zero(20) >>
  //     Changed(1000, 0) >>
- //     Log[Int]("rpmTarget:") >>
+      Log[Int]("rpmTarget:") >>
       mqtt.to[Int]("dst/drive/motor/rpmTarget")
 
     mqtt.from[Boolean]("src/remote/remote/buttonLeft") >>
@@ -152,7 +152,8 @@ object Main {
 
     mqtt.from[Boolean]("src/remote/system/alive") >> Toggle() >>  mqtt.to[Boolean]("dst/remote/remote/ledLeft")
     mqtt.from[Boolean]("src/drive/system/alive") >> Toggle() >>  mqtt.to[Boolean]("dst/remote/remote/ledRight")
-
+    mqtt.from[Boolean]("src/remote/system/alive") >> mqtt.to[Boolean]("dst/drive/motor/watchdogReset");
+    mqtt.from[Boolean]("src/remote/system/alive") >> mqtt.to[Boolean]("dst/drive/stepper/watchdogReset");
     poller(upTime, ipAddress)
     echo.out >> sender.in
     sender.out >> echo.in
