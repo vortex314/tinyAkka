@@ -96,7 +96,7 @@ case class Changed[T](timeout: Int, var oldValue: T) extends Flow[T, T] {
 }
 
 case class Rtc(fromTime:Time,toTime) extends ValueSource[Boolean] {
-  
+
 }
 
 class TreeShaker(thread:NanoThread) extends Actor(thread) {
